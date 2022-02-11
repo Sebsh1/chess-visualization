@@ -1,0 +1,569 @@
+<!DOCTYPE html>
+<!-- Original tree inspiration from https://bl.ocks.org/d3noob/8375092 -->	
+<html lang="en">
+
+  <head>
+
+    <meta charset="utf-8">
+
+    <title>Chess Visualization</title>
+
+	<!-- Chess.js library -->	
+	<script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js" 
+	integrity="sha512-xRllwz2gdZciIB+AkEbeq+gVhX8VB8XsfqeFbUh+SzHlN96dEduwtTuVuc2u9EROlmW9+yhRlxjif66ORpsgVA==" 
+	crossorigin="anonymous" ></script>
+
+	<!-- Checkerboard.js library-->	
+	<script src="https://code.jquery.com/jquery-3.5.1.min.js"
+	integrity="sha384-ZvpUoO/+PpLXR1lu4jmpXWu80pZlYUAfxl5NsBMWOEPSjUn/6Z/hRTt8+pR6L4N2"
+	crossorigin="anonymous"></script>
+	<script src="https://unpkg.com/@chrisoakman/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.js"
+	integrity="sha384-8Vi8VHwn3vjQ9eUHUxex3JSN/NFqUg3QbPyX8kWyb93+8AC/pPWTzj+nHtbC5bxD"
+	crossorigin="anonymous"></script>
+	<link rel="stylesheet"
+	href="https://unpkg.com/@chrisoakman/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.css"
+	integrity="sha384-q94+BZtLrkL1/ohfjR8c6L+A6qzNH9R2hBLwyoAfu3i/WCvQjzL2RQJ3uNHDISdU"
+	crossorigin="anonymous">
+
+	<!-- d3.js library -->	
+	<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/3.5.17/d3.min.js"></script>
+
+	<!-- CSS -->
+	<link rel="stylesheet" href="styles.css">
+
+	<!-- JSON TREE DATA -->
+	<script src="move_tree.js" ></script>
+
+  </head>
+
+  <body>
+	  
+	<div id="board1" style="width: 400px"></div>
+	
+	<div id="d3Tree"></div>
+
+	<div id="moveSequence"></div>
+
+	<div id="percentOfAllGames"> <div id=percent>100.00 %</div> of all games took this line</div>
+
+	<div id="d3stack"></div>
+
+	<div id="tooltip" class="hidden">
+		<p><span id="value">100</span>
+		</p>
+	</div>
+
+	<div id="d3hist"></div>
+	
+<script>
+// ************** CHESSBOARD	 *****************
+var boardConfig = {
+    pieceTheme: 'img/pieces/{piece}.png',
+    position: 'start'
+  };
+var board = Chessboard('board1', boardConfig);
+var game = new Chess();
+
+function makeMoveOnBoard(d) {
+	var move = d.name;
+	if (move == 'Restart') {
+		game = new Chess();
+		board = Chessboard('board1', boardConfig);
+	} else {
+		game.move(move);
+		board.position(game.fen());
+	}
+};
+
+function redoBoard(d) {
+	//var move_list = d.moves_before.concat([d.name]);
+	var move_list = d.moves_before;
+	game = new Chess();
+	for (let i = 0; i < move_list.length; i++) {
+		game.move(move_list[i]);
+	};
+	board.position(game.fen());
+};
+
+// ************** THE TREE	 *****************
+var treeData = tree // Loaded in from move_tree.js file
+
+var margin = {top: 20, right: 120, bottom: 20, left: 120};
+var width = 1800 - margin.right - margin.left;
+var height = 500 - margin.top - margin.bottom;
+	
+var i = 0;
+var duration = 750;
+var root;
+
+var tree = d3.layout.tree()
+	.size([height, width]);
+
+var diagonal = d3.svg.diagonal()
+	.projection(function(d) { return [d.y, d.x]; });
+
+var svg = d3.select("#d3Tree").append("svg")
+	.attr("width", width + margin.right + margin.left)
+	.attr("height", height + margin.top + margin.bottom)
+	.attr("margin", "auto")
+    .append("g")
+	.attr("transform", "translate(" + margin.left + "," + margin.top + ")");
+
+root = treeData[0];
+root.name = "Restart"
+root.x0 = height / 2;
+root.y0 = 0;
+
+// Start with first layer extended
+root.children = root._children;
+root._children = null;
+  
+update(root);
+
+d3.select(self.frameElement).style("height", "500px");
+
+function update(source) {
+
+  // Compute the new tree layout.
+  var nodes = tree.nodes(root).reverse();
+  var links = tree.links(nodes);
+
+  // Normalize for fixed-depth.
+  nodes.forEach(function(d) { d.y = d.depth * 150; });
+
+  // ************** NODES *****************
+  // Update the nodes…
+  var node = svg.selectAll("g.node")
+	  .data(nodes, function(d) { return d.id || (d.id = ++i); });
+
+  // Enter any new nodes at the parent's previous position.
+  var nodeEnter = node.enter().append("g")
+	  .attr("class", "node")
+	  .attr("transform", function(d) { return "translate(" + source.y0 + "," + source.x0 + ")"; })
+	  .on("click", click);
+
+  nodeEnter.append("circle")
+	  .attr("r", 1e-6)
+	  .style("fill", function(d) { return d.depth % 2 == 0 ? "black" : "white"; });
+
+  nodeEnter.append("text")
+	  .attr("x", -20 )
+	  .attr("dy", ".35em")
+	  .attr("text-anchor", "end")
+	  //.text(function(d) { return d.percent ? d.percent + "% " + d.name : d.name; })
+	  .text(function(d) { return d.name; })
+	  .style("font-weight", "bold")
+	  .style("fill-opacity", 1e-6);
+
+  // Transition nodes to their new position.
+  var nodeUpdate = node.transition()
+	  .duration(duration)
+	  .attr("transform", function(d) { return "translate(" + d.y + "," + d.x + ")"; });
+
+  nodeUpdate.select("circle")
+	  .attr("r", function(d) { return (d.percent / 100) * (22 - 4) + 4 })
+	  .style("fill", function(d) { return d.depth % 2 == 0  ? "black" : "white"; })
+	  .style("stroke", "BurlyWood");
+
+  nodeUpdate.select("text")
+	  .style("fill-opacity", 1);
+
+  // Transition exiting nodes to the parent's new position.
+  var nodeExit = node.exit().transition()
+	  .duration(duration)
+	  .attr("transform", function(d) { return "translate(" + source.y + "," + source.x + ")"; })
+	  .remove();
+
+  nodeExit.select("circle")
+	  .attr("r", 1e-6);
+
+  nodeExit.select("text")
+	  .style("fill-opacity", 1e-6);
+
+  // ************** LINKS *****************
+  // Update the links…
+  var link = svg.selectAll("path.link")
+	  .data(links, function(d) { return d.target.id; });
+
+  // Enter any new links at the parent's previous position.
+  link.enter().insert("path", "g")
+	  .attr("class", "link")
+	  .attr("d", function(d) {
+		var o = {x: source.x0, y: source.y0};
+		return diagonal({source: o, target: o});
+	  });
+
+  // Transition links to their new position.
+  link.transition()
+	  .duration(duration)
+	  .attr("d", diagonal)
+	  .attr("opacity", function(d){return (d.target.percent/100.0) * (10 - 0.2) + 0.2 ;});
+	  
+  // Transition exiting nodes to the parent's new position.
+  link.exit().transition()
+	  .duration(duration)
+	  .attr("d", function(d) {
+		var o = {x: source.x, y: source.y};
+		return diagonal({source: o, target: o});
+	  })
+	  .remove();
+
+  // Stash the old positions for transition.
+  nodes.forEach(function(d) {
+	d.x0 = d.x;
+	d.y0 = d.y;
+  });
+}
+
+current_depth = 0;
+previous_node = root;
+
+function click(d) {
+	/*
+	//Collapse previous node layer
+	if (d.depth > current_depth) {
+		previous_node._children = previous_node.children;
+		previous_node.children = [d];
+		previous_node = d;
+	}
+
+	// Clicked same node again
+	if (d.depth == current_depth) {
+		previous_node = d;	
+	}
+
+	// Clicked an earlier node
+	if (d.depth < current_depth) {
+		d.children = d.children + d._children;
+		d._children = null;
+		previous_node = d;
+		toggleChildren(d);
+	}
+	*/
+	toggleChildren(d);
+	updatePercentOfAllGames(d);
+	update(d);
+	updateHistogram(d);
+	updateStack(d);
+	if (current_depth <= d.depth || previous_node == d) {
+		makeMoveOnBoard(d);
+	} else {
+		redoBoard(d);
+	}
+		
+	
+
+	current_depth = d.depth;
+	previous_node = d;
+}
+
+// ************** MISC *****************
+function updatePercentOfAllGames(d) {
+	percentOfAllGamesDiv = document.getElementById("percent");
+	percent = (d.count / root.count * 100).toFixed(2);
+	if (percent < 0.01) {percent = "< 0.01";}
+	percentOfAllGamesDiv.innerHTML = percent + " %";
+}
+
+function hideChildrenRecursively(d){
+	if (d.children) {
+		for (let i = 0; i < d.children.length; i++) {
+			hideChildrenRecursively(d.children[i]);
+		}
+		d._children = d.children;
+		d.children = null;
+  	}
+}
+
+function toggleChildren(d){
+	if (d.name == "Restart") {
+		hideChildrenRecursively(d);
+		d.children = d._children;
+		d._children = null;
+	} else {
+		if (d.children) {
+			hideChildrenRecursively(d)
+  		} else {
+			d.children = d._children;
+			d._children = null;
+  	}
+	}
+	
+}
+	
+// ************** HISTOGRAM   *****************
+
+var margin_hist = {top: 20, right: 20, bottom: 20, left: 20};
+var height_hist = 300 - margin_hist.left - margin_hist.right;
+var width_hist = 500 - margin_hist.top - margin_hist.bottom;
+
+var data_hist = {"1800":0.02,"2000":0.07,"2200":0.15,"2400":0.23,"2600":0.23,"2800":0.18,"3000":0.09,"3200":0.04,"3400":0.01};
+var data_hist = Object.entries(data_hist).map(([key, value]) => ({[key]: value*2.5}))
+
+var mapped = data_hist.map(d => {
+  return {elo: Object.keys(d)[0],proportion: d[Object.keys(d)[0]]}});
+
+var x_hist = d3.scale.ordinal().rangeRoundBands([0, width_hist], .05);
+var y_hist = d3.scale.linear().range([height_hist, 0]);
+
+var x_domain = x_hist.domain(mapped.map(d => d.elo));
+var y_domain = [0, 1];
+
+var x_scale = d3.scale.ordinal()
+    .domain(["1800","2000","2200","2400","2600","2800","3000","3200","3400"])
+    .rangePoints([0, width_hist], 1);
+
+var x_axis = d3.svg.axis()
+    .scale(x_scale)
+    .orient("bottom");
+
+var y_scale = d3.scale.linear()
+    .range([height_hist, 0]);
+
+var y_axis = d3.svg.axis()
+    .scale(y_scale)
+    .ticks(10)
+    .orient("left");
+  
+var svg_hist = d3.select("#d3hist").append("svg")
+    .attr("width", width_hist + margin_hist.left + margin_hist.right)
+    .attr("height", height_hist + margin_hist.top + margin_hist.bottom);
+
+svg_hist.append("g")
+    .attr("class", "x axis")
+	.attr("transform", "translate(0, " + (height_hist + 7) + ")")
+    .call(x_axis);
+
+svg_hist.append("g")
+    .attr("class", "y axis")
+	.attr("transform", "translate(" + width_hist + ",5)")	
+    .call(y_axis)
+	.selectAll(".tick text")
+    .attr("transform", "translate(30,0)");
+
+svg_hist.selectAll("bar")
+    .data(mapped)
+    .enter().append("rect")
+      .style("fill", "steelblue")
+	  .attr("transform", "translate(0,5)")	
+      .attr("x", d => x_hist(d.elo))
+      .attr("width", x_hist.rangeBand())
+      .attr("y", d => y_hist(d.proportion))
+      .attr("height", d => height_hist - y_hist(d.proportion))
+	  .style("fill", "BurlyWood");
+
+svg_hist.append("text")
+   .attr("x", width_hist/2)
+   .attr("y", margin_hist.top)
+   .attr("text-anchor", "middle")
+   .style("font-size", "24px")
+   .text("Observed Elo Distribution");
+
+
+function updateHistogram(d) {
+	//Remove old bars
+	svg_hist.selectAll("rect").remove();
+
+	// Fetch new distribution
+	var data_hist = d.elo_distribution;
+	var data_hist = Object.entries(data_hist).map(([key, value]) => ({[key]: value*2.5}))
+	var mapped = data_hist.map(d => {
+  		return {
+    		elo: Object.keys(d)[0],
+    		proportion: d[Object.keys(d)[0]]
+  	}});
+
+	// Add new bars
+	svg_hist.selectAll("bar")
+    .data(mapped)
+    .enter().append("rect")
+      .style("fill", "steelblue")
+	  .attr("transform", "translate(0,5)")
+      .attr("x", d => x_hist(d.elo))
+      .attr("width", x_hist.rangeBand())
+      .attr("y", d => y_hist(d.proportion))
+      .attr("height", d => height_hist - y_hist(d.proportion))
+	  .style("fill", "BurlyWood");
+}
+
+// ************** STACKED BAR CHART	 *****************
+var margins_stack = {top: 24,left: 64,right: 64,bottom: 24};
+var width_stack = 700 - margins_stack.left - margins_stack.right;
+var height_stack = 100 - margins_stack.top - margins_stack.bottom;
+
+var whitewinrate = (root.winWhite*100/root.count);
+var blackwinrate = (root.winBlack*100/root.count);
+var draw = (100 - whitewinrate - blackwinrate);
+
+var dataset = [{data: [{month: 'Win Rate',count: whitewinrate}]}, {data: [{month: 'Win Rate',count: draw}]}, {data: [{month: 'Win Rate',count: blackwinrate}]}];
+var dataset = dataset.map(function (d) {return d.data.map(function (o, i) {return {y: o.count,x: o.month};});});
+var stack = d3.layout.stack();
+stack(dataset);
+
+var dataset = dataset.map(function (group) {return group.map(function (d) {return {x: d.y,y: d.x,x0: d.y0};});});
+
+var svg_stack = d3.select('#d3stack')
+        .append('svg')
+        .attr('width', width_stack + margins_stack.left + margins_stack.right)
+        .attr('height', height_stack + margins_stack.top + margins_stack.bottom)
+        .append('g')
+        .attr('transform', 'translate(' + margins_stack.left + ',' + margins_stack.top + ')');
+
+var xMax = d3.max(dataset, function (group) {return d3.max(group, function (d) {return d.x + d.x0;});});
+
+var xScale = d3.scale.linear()
+        .domain([0, xMax])
+        .range([0, width_stack]);
+
+var months = dataset[0].map(function (d) {return d.y;});
+
+var yScale = d3.scale.ordinal()
+        .domain(months)
+        .rangeRoundBands([0, height_stack], .1);
+
+var xAxis = d3.svg.axis()
+        .scale(xScale)
+        .orient('bottom');
+
+var yAxis = d3.svg.axis()
+        .scale(yScale)
+        .orient('left');
+
+var colours = ['ivory', 'grey','black'];
+
+var groups = svg_stack.selectAll('g')
+        .data(dataset)
+        .enter()
+        .append('g')
+        .style('fill', function (d, i) {return colours[i];});
+
+var rects = groups.selectAll('rect')
+        .data(function (d) {return d;})
+        .enter()
+        .append('rect')
+        .attr('x', function (d) {return xScale(d.x0);})
+        .attr('y', function (d, i) {return yScale(d.y);})
+        .attr('height', function (d) {return yScale.rangeBand();})
+        .attr('width', function (d) {return xScale(d.x);})
+        .on('mouseover', function (d) {
+			var xPos = parseFloat(d3.select(this).attr('x')) / 2 + width_stack / 2;
+			var yPos = parseFloat(d3.select(this).attr('y')) + yScale.rangeBand() / 2;
+
+			d3.select('#tooltip')
+				.style('left', xPos + 'px')
+				.style('top', yPos*12 + 'px')
+				.select('#value')
+				.text(d.x.toFixed(2));
+
+			d3.select('#tooltip').classed('hidden', false);})
+        .on('mouseout', function () {d3.select('#tooltip').classed('hidden', true);});
+
+svg_stack.append('g')
+    .attr('class', 'axis')
+    .attr('transform', 'translate(0,' + height_stack + ')')
+    .call(xAxis);
+
+svg_stack.append('g')
+    .attr('class', 'axis')
+    .call(yAxis);
+
+svg_stack.append("text")
+   .attr("x", width_stack/2)
+   .attr("y", margins_stack.top - 25)
+   .attr("text-anchor", "middle")
+   .style("font-size", "24px")
+   .text("Observed Win Rate");
+
+function updateStack(d) {
+
+d3.select("#d3stack").selectAll("*").remove();
+
+var whitewinrate = (d.winWhite*100/d.count);
+var blackwinrate = (d.winBlack*100/d.count);
+var draw = (100 - whitewinrate - blackwinrate);
+
+var dataset = [{data: [{month: 'Win Rate',count: whitewinrate}]}, {data: [{month: 'Win Rate',count: draw}]}, {data: [{month: 'Win Rate',count: blackwinrate}]}];
+var dataset = dataset.map(function (d) {return d.data.map(function (o, i) {return {y: o.count,x: o.month};});});
+var stack = d3.layout.stack();
+stack(dataset);
+
+var dataset = dataset.map(function (group) {return group.map(function (d) {return {x: d.y,y: d.x,x0: d.y0};});});
+
+var svg_stack = d3.select('#d3stack')
+        .append('svg')
+        .attr('width', width_stack + margins_stack.left + margins_stack.right)
+        .attr('height', height_stack + margins_stack.top + margins_stack.bottom)
+        .append('g')
+        .attr('transform', 'translate(' + margins_stack.left + ',' + margins_stack.top + ')');
+
+var xMax = d3.max(dataset, function (group) {return d3.max(group, function (d) {return d.x + d.x0;});});
+
+var xScale = d3.scale.linear()
+        .domain([0, xMax])
+        .range([0, width_stack]);
+
+var months = dataset[0].map(function (d) {return d.y;});
+
+var yScale = d3.scale.ordinal()
+        .domain(months)
+        .rangeRoundBands([0, height_stack], .1);
+
+var xAxis = d3.svg.axis()
+        .scale(xScale)
+        .orient('bottom');
+
+var yAxis = d3.svg.axis()
+        .scale(yScale)
+        .orient('left');
+
+var colours = ['ivory', 'grey','black'];
+
+var groups = svg_stack.selectAll('g')
+        .data(dataset)
+        .enter()
+        .append('g')
+        .style('fill', function (d, i) {return colours[i];});
+
+var rects = groups.selectAll('rect')
+        .data(function (d) {return d;})
+        .enter()
+        .append('rect')
+        .attr('x', function (d) {return xScale(d.x0);})
+        .attr('y', function (d, i) {return yScale(d.y);})
+        .attr('height', function (d) {return yScale.rangeBand();})
+        .attr('width', function (d) {return xScale(d.x);})
+        .on('mouseover', function (d) {
+			var xPos = parseFloat(d3.select(this).attr('x')) / 2 + width_stack / 2;
+			var yPos = parseFloat(d3.select(this).attr('y')) + yScale.rangeBand() / 2;
+
+			d3.select('#tooltip')
+				.style('left', xPos + 'px')
+				.style('top', yPos*12 + 'px')
+				.select('#value')
+				.text(d.x.toFixed(2));
+
+			d3.select('#tooltip').classed('hidden', false);})
+        .on('mouseout', function () {d3.select('#tooltip').classed('hidden', true);});
+
+svg_stack.append('g')
+    .attr('class', 'axis')
+    .attr('transform', 'translate(0,' + height_stack + ')')
+    .call(xAxis);
+
+svg_stack.append('g')
+    .attr('class', 'axis')
+    .call(yAxis);
+
+svg_stack.append("text")
+   .attr("x", width_stack/2)
+   .attr("y", margins_stack.top - 25)
+   .attr("text-anchor", "middle")
+   .style("font-size", "24px")
+   .text("Observed Win Rate");
+
+}
+
+</script>
+	
+</body>
+</html>
